@@ -1334,10 +1334,23 @@ export default function App() {
         </div>
         <p style={{ color: sub }}>Pick a trainer to get started. ({profiles.length}/{MAX_PROFILES})</p>
         {(typeof window !== "undefined" && window.localStorage && localStorage.getItem("xpet_family_code")) && (
-          <p style={{ color: sub, fontSize: 12, margin: "0 0 14px" }}>
-            Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{localStorage.getItem("xpet_family_code")}</span>
-            {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
-          </p>
+          <>
+            <p style={{ color: sub, fontSize: 12, margin: "0 0 6px" }}>
+              Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{localStorage.getItem("xpet_family_code")}</span>
+              {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
+            </p>
+            <button
+              onClick={() => {
+                if (window.confirm("Leave this family group? You can create a new one or join a different one with its code — you'll need this family's code again to come back.")) {
+                  localStorage.removeItem("xpet_family_code");
+                  window.location.reload();
+                }
+              }}
+              style={{ ...btnGhost, marginBottom: 14, fontSize: 12, padding: "6px 12px" }}
+            >
+              ← Create or join a different family
+            </button>
+          </>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {profiles.map((p) => (
