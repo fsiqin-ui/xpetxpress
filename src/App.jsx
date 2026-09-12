@@ -735,6 +735,11 @@ export default function App() {
   const [profiles, setProfiles] = useState([]);
   const [current, setCurrent] = useState(null);
   const [newName, setNewName] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [pinModalFor, setPinModalFor] = useState(null); // name of profile awaiting PIN entry
+  const [pinAttempt, setPinAttempt] = useState("");
+  const [pinAttemptError, setPinAttemptError] = useState(null);
+  const [pinBusy, setPinBusy] = useState(false);
   const [age, setAge] = useState(null); // current profile's age
   const [avatar, setAvatar] = useState(null); // current profile's zodiac avatar id, or null = default dog icon
   const [stats, setStats] = useState({});
@@ -855,19 +860,16 @@ export default function App() {
     const ls = await get(`longestStreak:${name}`, 0);
     const lpd = await get(`lastPlayedDay:${name}`, null);
 
-    // Migration: if this profile predates the bank-account system, give it a fair starting
-    // balance (its lifetime points earned so far) and keep whatever levels it had already reached.
+    // If balance/unlockedLevels/ledger haven't been saved yet, use a sensible fallback
+    // for display purposes only — we deliberately do NOT write this back to storage.
+    // (A save that simply hasn't landed yet must never be treated as "missing data
+    // to reset" — that previously caused real progress to be wiped after a refresh.)
     let bal = await get(`balance:${name}`, null);
     let unlocked = await get(`unlockedLevels:${name}`, null);
     let ldg = await get(`ledger:${name}`, null);
-    if (bal === null || unlocked === null || ldg === null) {
-      bal = bal === null ? sumPoints(ev, 0) : bal;
-      unlocked = unlocked === null ? [1, ...Object.keys(b).map(Number)] : unlocked;
-      ldg = ldg === null ? [] : ldg;
-      await set(`balance:${name}`, bal);
-      await set(`unlockedLevels:${name}`, unlocked);
-      await set(`ledger:${name}`, ldg);
-    }
+    if (bal === null) bal = sumPoints(ev, 0);
+    if (unlocked === null) unlocked = [1, ...Object.keys(b).map(Number)];
+    if (ldg === null) ldg = [];
 
     setStats(s);
     setLevelBests(b);
@@ -908,17 +910,37 @@ export default function App() {
     setLeaderboard(data);
   }, [get, profiles, current, events, age, avatar, profileCache]);
 
-  // Always refresh leaderboard data on entering the screen, so it can never show stale age/points
+  // Always refresh leaderboard data on entering the screen — including re-fetching
+  // the roster itself, since another device may have added a profile since this
+  // device last loaded it. Without this, two devices that joined the same family
+  // in the same session could each be unaware the other's profile exists.
   useEffect(() => {
     if (screen !== "leaderboard") return;
-    loadLeaderboard(profiles);
-  }, [screen, loadLeaderboard, profiles]);
+    (async () => {
+      const freshProfiles = await get("profiles", []);
+      setProfiles(freshProfiles);
+      await loadLeaderboard(freshProfiles);
+    })();
+  }, [screen]);
+
+  // Same reasoning: refresh the roster when switching trainers, so a profile
+  // created on another device shows up here without needing a full page reload.
+  useEffect(() => {
+    if (screen !== "profiles") return;
+    (async () => {
+      const freshProfiles = await get("profiles", []);
+      setProfiles(freshProfiles);
+    })();
+  }, [screen]);
 
   const addProfile = async () => {
     const name = newName.trim();
     if (!name || profiles.length >= MAX_PROFILES) return;
     if (profiles.some((p) => p.toLowerCase() === name.toLowerCase())) return;
+    if (!/^\d{4}$/.test(newPin)) return;
     const updated = [...profiles, name];
+    await set(`pin:${name}`, newPin);
+    setNewPin("");
     setProfiles(updated);
     await set("profiles", updated);
     setNewName("");
@@ -933,6 +955,9 @@ export default function App() {
     setLedger([]);
     setPets([]);
     setActivePetIndex(0);
+    saveInBackground(`balance:${name}`, 0);
+    saveInBackground(`unlockedLevels:${name}`, [1]);
+    saveInBackground(`ledger:${name}`, []);
     setProfileCache((prev) => ({ ...prev, [name]: { stats: {}, levelBests: {}, events: [], age: null, avatar: null, streak: 0, longestStreak: 0, lastPlayedDay: null, balance: 0, unlockedLevels: [1], ledger: [], pets: [] } }));
     setProfileAgesPreview((prev) => ({ ...prev, [name]: null }));
     setProfileAvatarsPreview((prev) => ({ ...prev, [name]: null }));
@@ -944,6 +969,34 @@ export default function App() {
     setCurrent(name);
     await loadProfileData(name);
     setScreen("menu");
+  };
+
+  const requestPinFor = (name) => {
+    setPinModalFor(name);
+    setPinAttempt("");
+    setPinAttemptError(null);
+  };
+
+  const submitPinAttempt = async () => {
+    if (pinAttempt.length !== 4 || !pinModalFor) return;
+    setPinBusy(true);
+    setPinAttemptError(null);
+    try {
+      const stored = await get(`pin:${pinModalFor}`, null);
+      if (stored === pinAttempt) {
+        const name = pinModalFor;
+        setPinModalFor(null);
+        setPinAttempt("");
+        await pickProfile(name);
+      } else {
+        setPinAttemptError("Incorrect PIN — try again.");
+        setPinAttempt("");
+      }
+    } catch (e) {
+      console.error(e);
+      setPinAttemptError("Couldn't check that PIN — check your connection and try again.");
+    }
+    setPinBusy(false);
   };
 
   const isUnlocked = (n) => n === 1 || unlockedLevels.includes(n);
@@ -1231,10 +1284,24 @@ export default function App() {
               That name is already taken — try another.
             </p>
           )}
+          <p style={{ color: sub, fontSize: 13, margin: "0 0 6px" }}>Set a 4-digit PIN so only you can open this profile:</p>
+          <input
+            value={newPin}
+            onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            onKeyDown={(e) => e.key === "Enter" && addProfile()}
+            placeholder="••••"
+            inputMode="numeric"
+            maxLength={4}
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12,
+              border: "1.5px solid #3A4A6B", background: "#0F1B33", color: ink, fontSize: 20, letterSpacing: 6,
+              textAlign: "center", fontWeight: 700, marginBottom: 14,
+            }}
+          />
           <button
             style={btnPrimary}
             onClick={addProfile}
-            disabled={!newName.trim() || profiles.some((p) => p.toLowerCase() === newName.trim().toLowerCase())}
+            disabled={!newName.trim() || newPin.length !== 4 || profiles.some((p) => p.toLowerCase() === newName.trim().toLowerCase())}
           >
             Create profile
           </button>
@@ -1254,7 +1321,7 @@ export default function App() {
           {profiles.map((p) => (
             <button
               key={p}
-              onClick={() => pickProfile(p)}
+              onClick={() => requestPinFor(p)}
               style={{ ...card, textAlign: "left", border: "none", color: ink, fontSize: 18, fontWeight: 700, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1281,6 +1348,49 @@ export default function App() {
           <p style={{ color: sub, fontSize: 13, marginTop: 18, textAlign: "center" }}>
             Maximum of {MAX_PROFILES} trainers reached.
           </p>
+        )}
+
+        {pinModalFor && (
+          <div
+            onClick={() => setPinModalFor(null)}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(6, 12, 26, 0.65)",
+              display: "flex", alignItems: "center", justifyContent: "center", padding: 24, zIndex: 50,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: "#16223F", border: `2px solid ${amber}`, borderRadius: 16, padding: 20, maxWidth: 320, width: "100%", textAlign: "center" }}
+            >
+              <p style={{ ...headFont, margin: "0 0 4px", fontSize: 17 }}>Enter {pinModalFor}'s PIN</p>
+              <p style={{ color: sub, fontSize: 12, margin: "0 0 14px" }}>This keeps your profile just for you.</p>
+              <input
+                value={pinAttempt}
+                onChange={(e) => setPinAttempt(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                onKeyDown={(e) => e.key === "Enter" && submitPinAttempt()}
+                placeholder="••••"
+                inputMode="numeric"
+                maxLength={4}
+                autoFocus
+                style={{
+                  width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12,
+                  border: "1.5px solid #3A4A6B", background: "#0F1B33", color: ink, fontSize: 22, letterSpacing: 8,
+                  textAlign: "center", fontWeight: 700, marginBottom: 10,
+                }}
+              />
+              {pinAttemptError && (
+                <p style={{ color: "#F2994A", fontSize: 13, marginBottom: 10 }}>{pinAttemptError}</p>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...btnGhost, flex: 1 }} onClick={() => setPinModalFor(null)} disabled={pinBusy}>
+                  Cancel
+                </button>
+                <button style={{ ...btnPrimary, flex: 1 }} onClick={submitPinAttempt} disabled={pinAttempt.length !== 4 || pinBusy}>
+                  {pinBusy ? "Checking…" : "Unlock"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -1326,7 +1436,7 @@ export default function App() {
             <span style={{ ...headFont, fontWeight: 700, fontSize: 14, color: amber }}>${balance}</span>
           </button>
           <button
-            onClick={async () => { await loadLeaderboard(profiles); setScreen("leaderboard"); }}
+            onClick={() => setScreen("leaderboard")}
             style={{ ...card, flex: 1, border: `2px solid ${amber}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: ink, fontFamily: "inherit", padding: "14px 8px" }}
           >
             <Trophy color={amber} size={22} />

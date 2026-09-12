@@ -17,7 +17,7 @@ import { db } from "./firebaseConfig";
 
 const FAMILY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
 const CACHE_TTL_MS = 5000;
-const WRITE_DEBOUNCE_MS = 700;
+const WRITE_DEBOUNCE_MS = 150; // short enough to still batch a burst of saves in one action, short enough to rarely be caught mid-flight by a refresh
 
 export function generateFamilyCode() {
   let code = "";
@@ -145,17 +145,42 @@ function scheduleFlush(ref, cacheKey) {
   }, WRITE_DEBOUNCE_MS);
 }
 
-// Best-effort save if the tab is closing with unsaved changes.
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", () => {
-    for (const cacheKey of Object.keys(pending)) {
-      const p = pending[cacheKey];
-      if (p.timer || Object.keys(p.changes).length || p.deletions.size) {
-        if (p.timer) clearTimeout(p.timer);
-        // Fire-and-forget; browsers don't guarantee this completes before the tab closes.
-      }
+// Reconstructs the right Firestore document reference from a cache key, so we
+// can flush any pending document on demand (used by the visibility/unload handlers below).
+function refForCacheKey(cacheKey) {
+  if (cacheKey.startsWith("shared:")) {
+    return sharedRef(cacheKey.slice("shared:".length));
+  }
+  const rest = cacheKey.slice("member:".length);
+  const sep = rest.indexOf(":");
+  return memberRef(rest.slice(0, sep), rest.slice(sep + 1));
+}
+
+function flushAllPendingNow() {
+  for (const cacheKey of Object.keys(pending)) {
+    const p = pending[cacheKey];
+    if (p.timer || Object.keys(p.changes).length || p.deletions.size) {
+      if (p.timer) clearTimeout(p.timer);
+      p.timer = null;
+      flushDoc(refForCacheKey(cacheKey), cacheKey); // not awaited — best effort, but now actually attempted
     }
+  }
+}
+
+// visibilitychange (tab hidden) fires reliably well before a page is actually torn
+// down, on both desktop and mobile — unlike beforeunload, which mobile Safari in
+// particular often doesn't fire at all. pagehide is a further mobile-friendly backstop.
+// Together these give any pending save a real chance to reach the server before a
+// refresh, tab switch, or app backgrounding — beforeunload alone was letting recent
+// saves get silently dropped.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushAllPendingNow();
   });
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushAllPendingNow);
+  window.addEventListener("beforeunload", flushAllPendingNow);
 }
 
 export async function importLocalDataToFamily(familyCode) {
