@@ -234,6 +234,66 @@ export async function importLocalDataToFamily(familyCode) {
   }
 }
 
+// Atomically creates a new member profile (their PIN + an entry in the shared
+// roster) only if the name isn't already taken. Two devices racing to create a
+// profile with the same name used to be resolved by whichever plain set() call
+// landed last, silently overwriting the first person's PIN and locking them out
+// of their own profile — this reads and writes both documents inside one
+// Firestore transaction, so the second attempt is told it lost the race instead.
+async function createProfile(familyCode, name, pinJson) {
+  const memberDocRef = memberRef(familyCode, name);
+  const sharedDocRef = sharedRef(familyCode);
+  const lowerName = name.toLowerCase();
+
+  const result = await runTransaction(db, async (tx) => {
+    const memberSnap = await tx.get(memberDocRef);
+    const sharedSnap = await tx.get(sharedDocRef);
+    const memberData = memberSnap.exists() ? memberSnap.data() : {};
+    if (Object.prototype.hasOwnProperty.call(memberData, "pin")) {
+      return { ok: false, reason: "taken" };
+    }
+    const sharedData = sharedSnap.exists() ? sharedSnap.data() : {};
+    let profiles = [];
+    if (typeof sharedData.profiles === "string") {
+      try { profiles = JSON.parse(sharedData.profiles); } catch { profiles = []; }
+    }
+    if (profiles.some((p) => p.toLowerCase() === lowerName)) {
+      return { ok: false, reason: "taken" };
+    }
+    const updatedProfiles = [...profiles, name];
+    tx.set(memberDocRef, { ...memberData, pin: pinJson });
+    tx.set(sharedDocRef, { ...sharedData, profiles: JSON.stringify(updatedProfiles) });
+    return { ok: true, profiles: updatedProfiles };
+  });
+
+  if (result.ok) {
+    // The two documents just changed server-side underneath any stale cache entry —
+    // drop both so the next get() re-fetches instead of serving pre-transaction data.
+    delete cache[`member:${familyCode}:${name}`];
+    delete cache[`shared:${familyCode}`];
+  }
+  return result;
+}
+
+// Same race, different entry point: a profile that predates the PIN feature has
+// no PIN yet, and whoever opens it first is meant to set it. Two people opening
+// it around the same moment used to mean the second plain set() call silently
+// overwrote the first person's PIN. This only writes if the field is still empty.
+async function claimPinIfAbsent(familyCode, name, pinJson) {
+  const memberDocRef = memberRef(familyCode, name);
+  const result = await runTransaction(db, async (tx) => {
+    const memberSnap = await tx.get(memberDocRef);
+    const memberData = memberSnap.exists() ? memberSnap.data() : {};
+    if (Object.prototype.hasOwnProperty.call(memberData, "pin")) {
+      return { ok: false, pin: memberData.pin };
+    }
+    tx.set(memberDocRef, { ...memberData, pin: pinJson });
+    return { ok: true };
+  });
+  if (result.ok) delete cache[`member:${familyCode}:${name}`];
+  return result;
+}
+
 export function createFamilyStorage(familyCode) {
   return {
     async get(key) {
@@ -281,5 +341,7 @@ export function createFamilyStorage(familyCode) {
     // Waits for any debounced writes still in flight to actually reach Firestore.
     // Use before anything irreversible (leaving the family, reloading, navigating away).
     flush: flushPendingWrites,
+    createProfile: (name, pinJson) => createProfile(familyCode, name, pinJson),
+    claimPin: (name, pinJson) => claimPinIfAbsent(familyCode, name, pinJson),
   };
 }

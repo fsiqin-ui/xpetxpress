@@ -743,6 +743,8 @@ export default function App() {
   const [pinIsNew, setPinIsNew] = useState(false); // true if this profile has no PIN yet
   const [familyAdmin, setFamilyAdmin] = useState(null);
   const [leavingFamily, setLeavingFamily] = useState(false);
+  const [addProfileBusy, setAddProfileBusy] = useState(false);
+  const [addProfileError, setAddProfileError] = useState(null);
   const [age, setAge] = useState(null); // current profile's age
   const [avatar, setAvatar] = useState(null); // current profile's zodiac avatar id, or null = default dog icon
   const [stats, setStats] = useState({});
@@ -776,20 +778,40 @@ export default function App() {
   const [petShop, setPetShop] = useState(null);
   const petActionTimer = useRef(null);
   const [, forceTick] = useState(0);
+  // Tracks which profile the latest `pets` snapshot actually belongs to. Needed
+  // because this ref is updated by its own effect (on `pets` changing) independently
+  // of the tick effect below (which restarts on `current` changing) — during the
+  // brief async gap while switching profiles (setCurrent has committed but the new
+  // profile's loadProfileData hasn't called setPets yet), the two could otherwise
+  // disagree and a tick would save the OLD profile's pets under the NEW profile's key.
+  const petsRef = useRef({ name: current, pets });
+  useEffect(() => { petsRef.current = { name: current, pets }; }, [current, pets]);
+  const petTickCount = useRef(0);
 
   // xPet: decay stats in real time while any dogs exist for the current profile.
-  // This only updates the on-screen numbers locally — it deliberately does NOT
-  // save to storage every tick, since decay is always correctly recalculated
-  // from the pet's last real action timestamp the next time it's loaded anyway.
-  // Saving here too would mean a network write every few seconds for no benefit.
+  // Persisted periodically (every 6th tick, ~30s — not on every 5s tick, to avoid
+  // hammering Firestore with writes) and immediately the moment a pet becomes sick.
+  // Without this, none of a session's live decay/sickness ever reached storage: the
+  // next load recalculated stats from whatever a real action (feed/play/clean/vet)
+  // last saved, at the slower idle rate, silently undoing any in-session decay and
+  // erasing sickness the moment you switched profiles or reloaded.
   useEffect(() => {
     if (pets.length === 0) return;
     const id = setInterval(() => {
-      setPets((prev) => prev.map((p) => tickPetSickness(p, Date.now())));
+      if (petsRef.current.name !== current) return; // profile switch in flight — skip this tick
+      const prevPets = petsRef.current.pets;
+      const next = prevPets.map((p) => tickPetSickness(p, Date.now()));
+      setPets(next);
+      const justGotSick = next.some((p, i) => p.sick && !prevPets[i].sick);
+      petTickCount.current += 1;
+      if (justGotSick || petTickCount.current % 6 === 0) {
+        saveInBackground(`pets:${current}`, next);
+        setProfileCache((cache) => ({ ...cache, [current]: { ...(cache[current] || {}), pets: next } }));
+      }
       forceTick((n) => n + 1);
     }, 5000);
     return () => clearInterval(id);
-  }, [pets.length]);
+  }, [pets.length, current, saveInBackground]);
 
   // Keep the on-screen clock ticking while a level is in progress
   useEffect(() => {
@@ -942,14 +964,34 @@ export default function App() {
 
   const addProfile = async () => {
     const name = newName.trim();
-    if (!name || profiles.length >= MAX_PROFILES) return;
+    if (!name || profiles.length >= MAX_PROFILES || addProfileBusy) return;
     if (profiles.some((p) => p.toLowerCase() === name.toLowerCase())) return;
     if (!/^\d{4}$/.test(newPin)) return;
-    const updated = [...profiles, name];
-    await set(`pin:${name}`, newPin);
+    setAddProfileBusy(true);
+    setAddProfileError(null);
+    let result;
+    try {
+      // A transaction against the server, not just a check against this device's
+      // possibly-stale local `profiles` list — two devices can otherwise create a
+      // same-named profile within moments of each other and the second write would
+      // silently overwrite the first person's PIN.
+      result = await window.storage.createProfile(name, JSON.stringify(newPin));
+    } catch (e) {
+      console.error("createProfile failed:", e);
+      setAddProfileBusy(false);
+      setAddProfileError("Couldn't create that profile — check your internet connection and try again.");
+      return;
+    }
+    setAddProfileBusy(false);
+    if (!result.ok) {
+      setAddProfileError("That name was just taken on another device — pick a different one.");
+      const fresh = await get("profiles", []);
+      setProfiles(fresh);
+      return;
+    }
+    const updated = result.profiles;
     setNewPin("");
     setProfiles(updated);
-    await set("profiles", updated);
     setNewName("");
     setCurrent(name);
     setAge(null);
@@ -994,12 +1036,25 @@ export default function App() {
       const stored = await get(`pin:${pinModalFor}`, null);
       if (stored === null) {
         // No PIN has ever been set for this profile (e.g. it predates the PIN
-        // feature) — set it now rather than locking the profile out forever.
-        await set(`pin:${pinModalFor}`, pinAttempt);
-        const name = pinModalFor;
-        setPinModalFor(null);
-        setPinAttempt("");
-        await pickProfile(name);
+        // feature) — claim it now rather than locking the profile out forever.
+        // This is a transaction, not a plain write: if someone else claimed it
+        // with a different PIN moments ago, we find out instead of overwriting them.
+        const result = await window.storage.claimPin(pinModalFor, JSON.stringify(pinAttempt));
+        if (result.ok) {
+          const name = pinModalFor;
+          setPinModalFor(null);
+          setPinAttempt("");
+          await pickProfile(name);
+        } else if (JSON.parse(result.pin) === pinAttempt) {
+          const name = pinModalFor;
+          setPinModalFor(null);
+          setPinAttempt("");
+          await pickProfile(name);
+        } else {
+          setPinAttemptError("This profile was just secured with a PIN on another device — ask them for it.");
+          setPinAttempt("");
+          setPinIsNew(false);
+        }
       } else if (stored === pinAttempt) {
         const name = pinModalFor;
         setPinModalFor(null);
@@ -1301,6 +1356,9 @@ export default function App() {
               That name is already taken — try another.
             </p>
           )}
+          {addProfileError && (
+            <p style={{ color: "#F2994A", fontSize: 13, margin: "0 0 10px" }}>{addProfileError}</p>
+          )}
           <p style={{ color: sub, fontSize: 13, margin: "0 0 6px" }}>Set a 4-digit PIN so only you can open this profile:</p>
           <input
             value={newPin}
@@ -1318,9 +1376,9 @@ export default function App() {
           <button
             style={btnPrimary}
             onClick={addProfile}
-            disabled={!newName.trim() || newPin.length !== 4 || profiles.some((p) => p.toLowerCase() === newName.trim().toLowerCase())}
+            disabled={addProfileBusy || !newName.trim() || newPin.length !== 4 || profiles.some((p) => p.toLowerCase() === newName.trim().toLowerCase())}
           >
-            Create profile
+            {addProfileBusy ? "Creating…" : "Create profile"}
           </button>
         </div>
       </div>
