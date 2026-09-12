@@ -47,7 +47,8 @@ const inputStyle = {
 };
 
 function FamilySetup({ onReady }) {
-  const [mode, setMode] = useState("choose"); // "choose" | "join" | "created"
+  const [mode, setMode] = useState("choose"); // "choose" | "createName" | "join" | "created"
+  const [adminNameInput, setAdminNameInput] = useState("");
   const [joinInput, setJoinInput] = useState("");
   const [joinError, setJoinError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -60,9 +61,11 @@ function FamilySetup({ onReady }) {
   }, []);
 
   const handleCreate = async () => {
+    const adminName = adminNameInput.trim();
+    if (!adminName) return;
     setBusy(true);
     try {
-      const code = await createFamily();
+      const code = await createFamily(adminName);
       setNewCode(code);
       setMode("created");
     } catch (e) {
@@ -108,8 +111,11 @@ function FamilySetup({ onReady }) {
       <Screen>
         <h1 style={{ fontSize: 20, margin: "0 0 8px" }}>Family created! 🎉</h1>
         <p style={{ color: sub, fontSize: 14, margin: "0 0 6px" }}>Your family code is:</p>
-        <p style={{ fontSize: 32, fontWeight: 800, letterSpacing: 4, color: amber, textAlign: "center", margin: "0 0 14px" }}>
+        <p style={{ fontSize: 32, fontWeight: 800, letterSpacing: 4, color: amber, textAlign: "center", margin: "0 0 6px" }}>
           {newCode}
+        </p>
+        <p style={{ color: sub, fontSize: 13, margin: "0 0 14px", textAlign: "center" }}>
+          Admin: <span style={{ color: ink, fontWeight: 700 }}>{adminNameInput.trim()}</span>
         </p>
         <p style={{ color: sub, fontSize: 13, margin: "0 0 18px" }}>
           Write this down. Enter it on any other device to share progress and the leaderboard.
@@ -132,6 +138,29 @@ function FamilySetup({ onReady }) {
         <button style={btnGhost} onClick={() => onReady(newCode)} disabled={busy}>
           Continue →
         </button>
+      </Screen>
+    );
+  }
+
+  if (mode === "createName") {
+    return (
+      <Screen>
+        <h1 style={{ fontSize: 20, margin: "0 0 8px" }}>Who's setting this up?</h1>
+        <p style={{ color: sub, fontSize: 13, margin: "0 0 14px" }}>
+          You'll be shown as this family's admin.
+        </p>
+        <input
+          value={adminNameInput}
+          onChange={(e) => setAdminNameInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          placeholder="Your name"
+          style={{ ...inputStyle, textTransform: "none", letterSpacing: 0, fontSize: 16 }}
+          maxLength={30}
+        />
+        <button style={{ ...btnPrimary, marginBottom: 10 }} onClick={handleCreate} disabled={busy || !adminNameInput.trim()}>
+          {busy ? "Creating…" : "Create family"}
+        </button>
+        <button style={btnGhost} onClick={() => setMode("choose")} disabled={busy}>← Back</button>
       </Screen>
     );
   }
@@ -162,8 +191,8 @@ function FamilySetup({ onReady }) {
       <p style={{ color: sub, fontSize: 14, margin: "0 0 20px" }}>
         Set up a family so progress and the leaderboard follow everyone across devices.
       </p>
-      <button style={{ ...btnPrimary, marginBottom: 10 }} onClick={handleCreate} disabled={busy}>
-        {busy ? "Creating…" : "✨ Create a new family"}
+      <button style={{ ...btnPrimary, marginBottom: 10 }} onClick={() => setMode("createName")} disabled={busy}>
+        ✨ Create a new family
       </button>
       <button style={btnGhost} onClick={() => setMode("join")} disabled={busy}>
         🔑 Join a family with a code

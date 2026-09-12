@@ -740,6 +740,8 @@ export default function App() {
   const [pinAttempt, setPinAttempt] = useState("");
   const [pinAttemptError, setPinAttemptError] = useState(null);
   const [pinBusy, setPinBusy] = useState(false);
+  const [pinIsNew, setPinIsNew] = useState(false); // true if this profile has no PIN yet
+  const [familyAdmin, setFamilyAdmin] = useState(null);
   const [age, setAge] = useState(null); // current profile's age
   const [avatar, setAvatar] = useState(null); // current profile's zodiac avatar id, or null = default dog icon
   const [stats, setStats] = useState({});
@@ -919,6 +921,8 @@ export default function App() {
     (async () => {
       const freshProfiles = await get("profiles", []);
       setProfiles(freshProfiles);
+      const admin = await get("admin", null);
+      setFamilyAdmin(admin);
       await loadLeaderboard(freshProfiles);
     })();
   }, [screen]);
@@ -930,6 +934,8 @@ export default function App() {
     (async () => {
       const freshProfiles = await get("profiles", []);
       setProfiles(freshProfiles);
+      const admin = await get("admin", null);
+      setFamilyAdmin(admin);
     })();
   }, [screen]);
 
@@ -975,6 +981,8 @@ export default function App() {
     setPinModalFor(name);
     setPinAttempt("");
     setPinAttemptError(null);
+    setPinIsNew(false);
+    get(`pin:${name}`, null).then((stored) => setPinIsNew(stored === null));
   };
 
   const submitPinAttempt = async () => {
@@ -983,7 +991,15 @@ export default function App() {
     setPinAttemptError(null);
     try {
       const stored = await get(`pin:${pinModalFor}`, null);
-      if (stored === pinAttempt) {
+      if (stored === null) {
+        // No PIN has ever been set for this profile (e.g. it predates the PIN
+        // feature) — set it now rather than locking the profile out forever.
+        await set(`pin:${pinModalFor}`, pinAttempt);
+        const name = pinModalFor;
+        setPinModalFor(null);
+        setPinAttempt("");
+        await pickProfile(name);
+      } else if (stored === pinAttempt) {
         const name = pinModalFor;
         setPinModalFor(null);
         setPinAttempt("");
@@ -1317,6 +1333,12 @@ export default function App() {
           <Logo width={280} />
         </div>
         <p style={{ color: sub }}>Pick a trainer to get started. ({profiles.length}/{MAX_PROFILES})</p>
+        {(typeof window !== "undefined" && window.localStorage && localStorage.getItem("xpet_family_code")) && (
+          <p style={{ color: sub, fontSize: 12, margin: "0 0 14px" }}>
+            Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{localStorage.getItem("xpet_family_code")}</span>
+            {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
+          </p>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {profiles.map((p) => (
             <button
@@ -1362,8 +1384,12 @@ export default function App() {
               onClick={(e) => e.stopPropagation()}
               style={{ background: "#16223F", border: `2px solid ${amber}`, borderRadius: 16, padding: 20, maxWidth: 320, width: "100%", textAlign: "center" }}
             >
-              <p style={{ ...headFont, margin: "0 0 4px", fontSize: 17 }}>Enter {pinModalFor}'s PIN</p>
-              <p style={{ color: sub, fontSize: 12, margin: "0 0 14px" }}>This keeps your profile just for you.</p>
+              <p style={{ ...headFont, margin: "0 0 4px", fontSize: 17 }}>
+                {pinIsNew ? `Set a PIN for ${pinModalFor}` : `Enter ${pinModalFor}'s PIN`}
+              </p>
+              <p style={{ color: sub, fontSize: 12, margin: "0 0 14px" }}>
+                {pinIsNew ? "This profile doesn't have a PIN yet — choose one now." : "This keeps your profile just for you."}
+              </p>
               <input
                 value={pinAttempt}
                 onChange={(e) => setPinAttempt(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -1386,7 +1412,7 @@ export default function App() {
                   Cancel
                 </button>
                 <button style={{ ...btnPrimary, flex: 1 }} onClick={submitPinAttempt} disabled={pinAttempt.length !== 4 || pinBusy}>
-                  {pinBusy ? "Checking…" : "Unlock"}
+                  {pinBusy ? "Checking…" : pinIsNew ? "Set PIN" : "Unlock"}
                 </button>
               </div>
             </div>
@@ -2057,6 +2083,7 @@ export default function App() {
         {familyCode && (
           <p style={{ color: sub, fontSize: 12, margin: "0 0 12px", textAlign: "center" }}>
             Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{familyCode}</span>
+            {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
           </p>
         )}
 

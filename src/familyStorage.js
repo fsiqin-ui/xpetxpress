@@ -43,12 +43,15 @@ export async function familyExists(code) {
   return snap.exists();
 }
 
-export async function createFamily() {
+export async function createFamily(adminName) {
   let code = generateFamilyCode();
   while (await familyExists(code)) {
     code = generateFamilyCode();
   }
-  await setDoc(sharedRef(code), { createdAt: Date.now() });
+  // Stored JSON-encoded, matching how every other value the app saves is
+  // stored — the app's own get()/set() helpers always JSON parse/stringify,
+  // so anything written directly here needs to match that format too.
+  await setDoc(sharedRef(code), { createdAt: Date.now(), admin: JSON.stringify(adminName) });
   return code;
 }
 
