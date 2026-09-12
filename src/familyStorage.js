@@ -159,15 +159,24 @@ function refForCacheKey(cacheKey) {
   return memberRef(rest.slice(0, sep), rest.slice(sep + 1));
 }
 
-function flushAllPendingNow() {
+// Awaitable version of the same sweep, for callers that need to be sure every
+// pending write has actually reached Firestore before doing something
+// irreversible (e.g. leaving the family and reloading the page).
+export async function flushPendingWrites() {
+  const flushes = [];
   for (const cacheKey of Object.keys(pending)) {
     const p = pending[cacheKey];
     if (p.timer || Object.keys(p.changes).length || p.deletions.size) {
       if (p.timer) clearTimeout(p.timer);
       p.timer = null;
-      flushDoc(refForCacheKey(cacheKey), cacheKey); // not awaited — best effort, but now actually attempted
+      flushes.push(flushDoc(refForCacheKey(cacheKey), cacheKey));
     }
   }
+  await Promise.all(flushes);
+}
+
+function flushAllPendingNow() {
+  flushPendingWrites(); // not awaited — best effort, page may be gone before this resolves
 }
 
 // visibilitychange (tab hidden) fires reliably well before a page is actually torn
@@ -269,5 +278,8 @@ export function createFamilyStorage(familyCode) {
       // Not used by the app (every lookup already knows the exact key it wants).
       return { keys: [], shared: false };
     },
+    // Waits for any debounced writes still in flight to actually reach Firestore.
+    // Use before anything irreversible (leaving the family, reloading, navigating away).
+    flush: flushPendingWrites,
   };
 }

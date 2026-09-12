@@ -742,6 +742,7 @@ export default function App() {
   const [pinBusy, setPinBusy] = useState(false);
   const [pinIsNew, setPinIsNew] = useState(false); // true if this profile has no PIN yet
   const [familyAdmin, setFamilyAdmin] = useState(null);
+  const [leavingFamily, setLeavingFamily] = useState(false);
   const [age, setAge] = useState(null); // current profile's age
   const [avatar, setAvatar] = useState(null); // current profile's zodiac avatar id, or null = default dog icon
   const [stats, setStats] = useState({});
@@ -1093,14 +1094,14 @@ export default function App() {
     persistPets(next);
   };
   const petFeed = (item) => {
-    if (balance < item.cost) return;
+    if (petAction || balance < item.cost) return;
     const pet = pets[activePetIndex];
     spendOnPet(item.cost, `Fed ${pet.name} (${item.name})`);
     setPetShop(null);
     runPetAction("eating", 1800, () => petUpdateActive((p) => ({ ...p, hunger: petClampStat(p.hunger + item.restore), lastUpdate: Date.now() })));
   };
   const petPlay = (item) => {
-    if (balance < item.cost) return;
+    if (petAction || balance < item.cost) return;
     const pet = pets[activePetIndex];
     spendOnPet(item.cost, `Played with ${pet.name} (${item.name})`);
     setPetShop(null);
@@ -1114,7 +1115,7 @@ export default function App() {
     runPetAction("cleaning", 1200, () => petUpdateActive((p) => ({ ...p, cleanliness: PET_MAX, lastUpdate: Date.now() })));
   };
   const petTreatSick = () => {
-    if (balance < PET_VET_COST) return;
+    if (petAction || balance < PET_VET_COST) return;
     const pet = pets[activePetIndex];
     spendOnPet(PET_VET_COST, `Vet visit for ${pet.name}`);
     setPetShop(null);
@@ -1340,15 +1341,23 @@ export default function App() {
               {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
             </p>
             <button
-              onClick={() => {
-                if (window.confirm("Leave this family group? You can create a new one or join a different one with its code — you'll need this family's code again to come back.")) {
-                  localStorage.removeItem("xpet_family_code");
-                  window.location.reload();
+              onClick={async () => {
+                if (!window.confirm("Leave this family group? You can create a new one or join a different one with its code — you'll need this family's code again to come back.")) return;
+                setLeavingFamily(true);
+                try {
+                  // Make sure any progress from the last few seconds actually reaches
+                  // Firestore before we tear the page down, or it can be silently lost.
+                  if (window.storage && window.storage.flush) await window.storage.flush();
+                } catch (e) {
+                  console.error("flush before leaving family failed:", e);
                 }
+                localStorage.removeItem("xpet_family_code");
+                window.location.reload();
               }}
-              style={{ ...btnGhost, marginBottom: 14, fontSize: 12, padding: "6px 12px" }}
+              disabled={leavingFamily}
+              style={{ ...btnGhost, marginBottom: 14, fontSize: 12, padding: "6px 12px", opacity: leavingFamily ? 0.6 : 1 }}
             >
-              ← Create or join a different family
+              {leavingFamily ? "Saving your progress…" : "← Create or join a different family"}
             </button>
           </>
         )}
@@ -2000,8 +2009,8 @@ export default function App() {
                 <h3 style={{ ...headFont, fontSize: 14, margin: "0 0 10px" }}>Food</h3>
                 <div style={{ display: "flex", gap: 8 }}>
                   {PET_FOOD_ITEMS.map((item) => (
-                    <button key={item.id} onClick={() => petFeed(item)} disabled={balance < item.cost}
-                      style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "10px 6px", borderRadius: 12, cursor: balance < item.cost ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1.5px solid #3A4A6B", background: "#0F1B33", opacity: balance < item.cost ? 0.45 : 1 }}>
+                    <button key={item.id} onClick={() => petFeed(item)} disabled={!!petAction || balance < item.cost}
+                      style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "10px 6px", borderRadius: 12, cursor: (petAction || balance < item.cost) ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1.5px solid #3A4A6B", background: "#0F1B33", opacity: (petAction || balance < item.cost) ? 0.45 : 1 }}>
                       <span style={{ fontSize: 22 }}>{item.emoji}</span>
                       <span style={{ fontSize: 11, fontWeight: 700 }}>{item.name}</span>
                       <span style={{ fontSize: 11, color: pGold, fontWeight: 700 }}>${item.cost}</span>
@@ -2016,8 +2025,8 @@ export default function App() {
                 <h3 style={{ ...headFont, fontSize: 14, margin: "0 0 10px" }}>Toys</h3>
                 <div style={{ display: "flex", gap: 8 }}>
                   {PET_TOY_ITEMS.map((item) => (
-                    <button key={item.id} onClick={() => petPlay(item)} disabled={balance < item.cost}
-                      style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "10px 6px", borderRadius: 12, cursor: balance < item.cost ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1.5px solid #3A4A6B", background: "#0F1B33", opacity: balance < item.cost ? 0.45 : 1 }}>
+                    <button key={item.id} onClick={() => petPlay(item)} disabled={!!petAction || balance < item.cost}
+                      style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "10px 6px", borderRadius: 12, cursor: (petAction || balance < item.cost) ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1.5px solid #3A4A6B", background: "#0F1B33", opacity: (petAction || balance < item.cost) ? 0.45 : 1 }}>
                       <span style={{ fontSize: 22 }}>{item.emoji}</span>
                       <span style={{ fontSize: 11, fontWeight: 700 }}>{item.name}</span>
                       <span style={{ fontSize: 11, color: pGold, fontWeight: 700 }}>${item.cost}</span>
@@ -2047,7 +2056,7 @@ export default function App() {
                 {activePet.sick ? (
                   <>
                     <p style={{ color: pSub, fontSize: 13, margin: "0 0 10px" }}>{activePet.name} needs a checkup.</p>
-                    <button style={pPrimary} onClick={petTreatSick} disabled={balance < PET_VET_COST}>Take to vet · ${PET_VET_COST}</button>
+                    <button style={pPrimary} onClick={petTreatSick} disabled={!!petAction || balance < PET_VET_COST}>Take to vet · ${PET_VET_COST}</button>
                   </>
                 ) : (
                   <p style={{ color: pSub, fontSize: 13, margin: 0 }}>{activePet.name} is healthy! No visit needed. ✅</p>
