@@ -394,29 +394,37 @@ const PET_TOY_ITEMS = [
 function petClampStat(v) {
   return Math.max(PET_FLOOR, Math.min(PET_MAX, v));
 }
-function applyPetDecayWithRates(pet, now, rates) {
+// Decay (and sickness risk) scale up with the highest level a profile has ever
+// unlocked. Higher levels pay out more per run, so upkeep costs more to match —
+// otherwise pet care stops mattering the moment money gets easy. Gentle curve:
+// 1x at level 1, ~1.6x at level 5, 2.35x at level 10.
+function petDecayMultiplier(unlockedLevels) {
+  const highest = unlockedLevels && unlockedLevels.length ? Math.max(...unlockedLevels) : 1;
+  return 1 + (highest - 1) * 0.15;
+}
+function applyPetDecayWithRates(pet, now, rates, multiplier = 1) {
   if (!pet) return pet;
   const elapsedMin = Math.max(0, (now - pet.lastUpdate) / 60000);
   return {
     ...pet,
-    hunger: petClampStat(pet.hunger - rates.hunger * elapsedMin),
-    energy: petClampStat(pet.energy - rates.energy * elapsedMin),
-    happiness: petClampStat(pet.happiness - rates.happiness * elapsedMin),
-    cleanliness: petClampStat((pet.cleanliness ?? PET_MAX) - rates.cleanliness * elapsedMin),
+    hunger: petClampStat(pet.hunger - rates.hunger * multiplier * elapsedMin),
+    energy: petClampStat(pet.energy - rates.energy * multiplier * elapsedMin),
+    happiness: petClampStat(pet.happiness - rates.happiness * multiplier * elapsedMin),
+    cleanliness: petClampStat((pet.cleanliness ?? PET_MAX) - rates.cleanliness * multiplier * elapsedMin),
     lastUpdate: now,
   };
 }
 // Used when a profile loads — covers however long the app was closed, at the gentle idle rate.
-function applyPetDecay(pet, now) {
-  return applyPetDecayWithRates(pet, now, PET_DECAY_IDLE);
+function applyPetDecay(pet, now, multiplier = 1) {
+  return applyPetDecayWithRates(pet, now, PET_DECAY_IDLE, multiplier);
 }
 // Used by the live in-app tick while a session is active, at the faster active rate.
-function applyActivePetDecay(pet, now) {
-  return applyPetDecayWithRates(pet, now, PET_DECAY_ACTIVE);
+function applyActivePetDecay(pet, now, multiplier = 1) {
+  return applyPetDecayWithRates(pet, now, PET_DECAY_ACTIVE, multiplier);
 }
-function tickPetSickness(pet, now) {
-  const next = applyActivePetDecay(pet, now);
-  if (!next.sick && (next.hunger <= PET_FLOOR || next.cleanliness <= PET_FLOOR) && Math.random() < PET_SICK_CHANCE_PER_TICK) {
+function tickPetSickness(pet, now, multiplier = 1) {
+  const next = applyActivePetDecay(pet, now, multiplier);
+  if (!next.sick && (next.hunger <= PET_FLOOR || next.cleanliness <= PET_FLOOR) && Math.random() < PET_SICK_CHANCE_PER_TICK * multiplier) {
     next.sick = true;
   }
   return next;
@@ -807,10 +815,11 @@ export default function App() {
   // erasing sickness the moment you switched profiles or reloaded.
   useEffect(() => {
     if (pets.length === 0) return;
+    const multiplier = petDecayMultiplier(unlockedLevels);
     const id = setInterval(() => {
       if (petsRef.current.name !== current) return; // profile switch in flight — skip this tick
       const prevPets = petsRef.current.pets;
-      const next = prevPets.map((p) => tickPetSickness(p, Date.now()));
+      const next = prevPets.map((p) => tickPetSickness(p, Date.now(), multiplier));
       setPets(next);
       const justGotSick = next.some((p, i) => p.sick && !prevPets[i].sick);
       petTickCount.current += 1;
@@ -821,7 +830,7 @@ export default function App() {
       forceTick((n) => n + 1);
     }, 5000);
     return () => clearInterval(id);
-  }, [pets.length, current, saveInBackground]);
+  }, [pets.length, current, saveInBackground, unlockedLevels]);
 
   // Keep the on-screen clock ticking while a level is in progress
   useEffect(() => {
@@ -881,7 +890,8 @@ export default function App() {
       setBalance(profileCache[name].balance || 0);
       setUnlockedLevels(profileCache[name].unlockedLevels || [1]);
       setLedger(profileCache[name].ledger || []);
-      const cachedPets = (profileCache[name].pets || []).map((p) => applyPetDecay(p, Date.now()));
+      const cachedMultiplier = petDecayMultiplier(profileCache[name].unlockedLevels || [1]);
+      const cachedPets = (profileCache[name].pets || []).map((p) => applyPetDecay(p, Date.now(), cachedMultiplier));
       setPets(cachedPets);
       setActivePetIndex(0);
       return;
@@ -918,7 +928,8 @@ export default function App() {
     setUnlockedLevels(unlocked);
     setLedger(ldg);
     const rawPets = await get(`pets:${name}`, []);
-    const decayedPets = rawPets.map((p) => applyPetDecay(p, Date.now()));
+    const multiplier = petDecayMultiplier(unlocked);
+    const decayedPets = rawPets.map((p) => applyPetDecay(p, Date.now(), multiplier));
     setPets(decayedPets);
     setActivePetIndex(0);
     setProfileCache((prev) => ({
