@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, ArrowLeft, Trophy, RotateCcw, Delete, Zap, Sparkles, Lock, Volume2, VolumeX, Flame, Star, Check, X } from "lucide-react";
+import { Plus, ArrowLeft, Trophy, RotateCcw, Delete, Zap, Sparkles, Lock, Volume2, VolumeX, Flame, Star, Check, X, Copy, Share2 } from "lucide-react";
 
 // Ten levels, each a bit harder than the last
 const LEVELS = [
@@ -722,6 +722,14 @@ const petKeyframes = `
 `;
 // ======================= end xPet =======================
 
+// Text shared when inviting someone to a family — includes the code AND the
+// site link, since the code alone is useless to someone who doesn't already
+// have this page open.
+function familyInviteMessage(code) {
+  const url = typeof window !== "undefined" ? window.location.origin : "";
+  return `Join our xPet family! Use code ${code} at ${url}`;
+}
+
 export default function App() {
   const { get, set, ready } = useStorage();
   // Responsiveness: saving to storage should never make the player wait to see
@@ -743,6 +751,8 @@ export default function App() {
   const [pinIsNew, setPinIsNew] = useState(false); // true if this profile has no PIN yet
   const [familyAdmin, setFamilyAdmin] = useState(null);
   const [leavingFamily, setLeavingFamily] = useState(false);
+  const [familyCodeCopied, setFamilyCodeCopied] = useState(false);
+  const canShareFamilyCode = typeof navigator !== "undefined" && !!navigator.share;
   const [addProfileBusy, setAddProfileBusy] = useState(false);
   const [addProfileError, setAddProfileError] = useState(null);
   const [age, setAge] = useState(null); // current profile's age
@@ -1012,6 +1022,23 @@ export default function App() {
     setProfileAvatarsPreview((prev) => ({ ...prev, [name]: null }));
     await loadProfileData(name);
     setScreen("menu");
+  };
+
+  const copyFamilyInvite = async (code) => {
+    try {
+      await navigator.clipboard.writeText(familyInviteMessage(code));
+      setFamilyCodeCopied(true);
+      setTimeout(() => setFamilyCodeCopied(false), 2000);
+    } catch (e) {
+      console.error("copy failed:", e);
+    }
+  };
+  const shareFamilyInvite = async (code) => {
+    try {
+      await navigator.share({ title: "xPet family code", text: familyInviteMessage(code) });
+    } catch (e) {
+      // AbortError when the user just closes the share sheet — nothing to do
+    }
   };
 
   const pickProfile = async (name) => {
@@ -1326,6 +1353,24 @@ export default function App() {
     background: "transparent", color: ink, border: "1.5px solid #3A4A6B", borderRadius: 14,
     padding: "12px 18px", fontWeight: 600, fontSize: 15, cursor: "pointer", fontFamily: "inherit",
   };
+  const iconBtnSmall = {
+    background: "transparent", color: sub, border: "1.5px solid #3A4A6B", borderRadius: 8,
+    width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer", fontFamily: "inherit", padding: 0, verticalAlign: "middle",
+  };
+  const familyCodeActions = (code) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 6 }}>
+      <button onClick={() => copyFamilyInvite(code)} style={iconBtnSmall} aria-label="Copy family code and invite link">
+        <Copy size={12} />
+      </button>
+      {canShareFamilyCode && (
+        <button onClick={() => shareFamilyInvite(code)} style={iconBtnSmall} aria-label="Share family code and invite link">
+          <Share2 size={12} />
+        </button>
+      )}
+      {familyCodeCopied && <span style={{ color: "#3FB27F", fontSize: 11 }}>Copied!</span>}
+    </span>
+  );
 
   if (screen === "loading") {
     return <div style={wrap}>Loading…</div>;
@@ -1397,6 +1442,7 @@ export default function App() {
             <p style={{ color: sub, fontSize: 12, margin: "0 0 6px" }}>
               Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{localStorage.getItem("xpet_family_code")}</span>
               {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
+              {familyCodeActions(localStorage.getItem("xpet_family_code"))}
             </p>
             <button
               onClick={async () => {
@@ -2164,6 +2210,7 @@ export default function App() {
           <p style={{ color: sub, fontSize: 12, margin: "0 0 12px", textAlign: "center" }}>
             Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{familyCode}</span>
             {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
+            {familyCodeActions(familyCode)}
           </p>
         )}
 
