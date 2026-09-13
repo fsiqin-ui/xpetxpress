@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, ArrowLeft, Trophy, RotateCcw, Delete, Zap, Sparkles, Lock, Volume2, VolumeX, Flame, Star, Check, X, Copy, Share2 } from "lucide-react";
+import { Plus, ArrowLeft, Trophy, RotateCcw, Delete, Zap, Sparkles, Lock, Volume2, VolumeX, Flame, Star, Check, X, Copy, Share2, DoorOpen } from "lucide-react";
 
 // Ten levels, each a bit harder than the last
 const LEVELS = [
@@ -780,6 +780,7 @@ export default function App() {
   const [profileCache, setProfileCache] = useState({}); // name -> { stats, levelBests, events, age, avatar, streak, lastPlayedDay, balance, unlockedLevels, ledger }
   const [profileAgesPreview, setProfileAgesPreview] = useState({}); // name -> age, for the picker list
   const [profileAvatarsPreview, setProfileAvatarsPreview] = useState({}); // name -> avatar id, for the picker list
+  const [profilePinPreview, setProfilePinPreview] = useState({}); // name -> pin (or null if never set), for the picker list
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [quiz, setQuiz] = useState(null);
   const [lastResult, setLastResult] = useState(null);
@@ -868,12 +869,16 @@ export default function App() {
       setScreen(p.length ? "profiles" : "addProfile");
       const ages = {};
       const avatars = {};
+      const pins = {};
       for (const name of p) {
         ages[name] = await get(`age:${name}`, null);
         avatars[name] = await get(`avatar:${name}`, null);
+        // So the picker can tell a kid "no PIN yet" before they tap in, not after.
+        pins[name] = await get(`pin:${name}`, null);
       }
       setProfileAgesPreview(ages);
       setProfileAvatarsPreview(avatars);
+      setProfilePinPreview(pins);
     })();
   }, [ready, get]);
 
@@ -1062,7 +1067,10 @@ export default function App() {
     setPinModalFor(name);
     setPinAttempt("");
     setPinAttemptError(null);
-    setPinIsNew(false);
+    // Seed from the picker's already-fetched preview so the modal opens with the
+    // right title immediately, instead of briefly showing "Enter PIN" before
+    // flipping to "Set a PIN" once this re-check resolves.
+    setPinIsNew(profilePinPreview[name] === null);
     get(`pin:${name}`, null).then((stored) => setPinIsNew(stored === null));
   };
 
@@ -1442,19 +1450,12 @@ export default function App() {
   }
 
   if (screen === "profiles") {
+    const hasFamilyCode = typeof window !== "undefined" && window.localStorage && localStorage.getItem("xpet_family_code");
     return (
       <div style={wrap}>
-        <div style={{ marginBottom: 22 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
           <Logo width={280} />
-        </div>
-        <p style={{ color: sub }}>Pick a trainer to get started. ({profiles.length}/{MAX_PROFILES})</p>
-        {(typeof window !== "undefined" && window.localStorage && localStorage.getItem("xpet_family_code")) && (
-          <>
-            <p style={{ color: sub, fontSize: 12, margin: "0 0 6px" }}>
-              Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{localStorage.getItem("xpet_family_code")}</span>
-              {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
-              {familyCodeActions(localStorage.getItem("xpet_family_code"))}
-            </p>
+          {hasFamilyCode && (
             <button
               onClick={async () => {
                 if (!window.confirm("Leave this family group? You can create a new one or join a different one with its code — you'll need this family's code again to come back.")) return;
@@ -1470,12 +1471,28 @@ export default function App() {
                 window.location.reload();
               }}
               disabled={leavingFamily}
-              style={{ ...btnGhost, marginBottom: 14, fontSize: 12, padding: "6px 12px", opacity: leavingFamily ? 0.6 : 1 }}
+              aria-label={leavingFamily ? "Saving your progress…" : "Leave this family and create or join a different one"}
+              title="Leave this family and create or join a different one"
+              style={{
+                ...btnGhost, width: "auto", padding: "8px 10px", display: "flex", alignItems: "center",
+                opacity: leavingFamily ? 0.6 : 1, flexShrink: 0,
+              }}
             >
-              {leavingFamily ? "Saving your progress…" : "← Create or join a different family"}
+              <DoorOpen size={18} />
             </button>
-          </>
+          )}
+        </div>
+        <p style={{ color: sub }}>Who's playing? ({profiles.length}/{MAX_PROFILES})</p>
+        {hasFamilyCode && (
+          <p style={{ color: sub, fontSize: 12, margin: "0 0 14px" }}>
+            Family code: <span style={{ color: amber, fontWeight: 700, letterSpacing: 1 }}>{localStorage.getItem("xpet_family_code")}</span>
+            {familyAdmin && <> · Admin: <span style={{ color: ink, fontWeight: 700 }}>{familyAdmin}</span></>}
+            {familyCodeActions(localStorage.getItem("xpet_family_code"))}
+          </p>
         )}
+        {/* TODO (deferred, revisit later): give a kid's own profile row some visual
+            distinction from their siblings' — a color/border/something — so they can
+            spot "mine" at a glance instead of reading every name. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {profiles.map((p) => (
             <button
@@ -1490,9 +1507,14 @@ export default function App() {
                   {profileAgesPreview[p] && (
                     <span style={{ color: sub, fontWeight: 400, fontSize: 13 }}> · Age {profileAgesPreview[p]}</span>
                   )}
+                  {profilePinPreview[p] === null && (
+                    <span style={{ color: amber, fontWeight: 400, fontSize: 13 }}> · No PIN yet</span>
+                  )}
                 </span>
               </span>
-              <span style={{ color: sub, fontWeight: 400, fontSize: 14 }}>Play →</span>
+              <span style={{ color: sub, fontWeight: 400, fontSize: 14 }}>
+                {profilePinPreview[p] === null ? "Set PIN →" : "Play →"}
+              </span>
             </button>
           ))}
         </div>
@@ -1509,6 +1531,10 @@ export default function App() {
           </p>
         )}
 
+        {/* TODO (deferred, revisit later): typing the 4-digit PIN every single open is
+            friction on a device the family always uses. Consider a "stay signed in on
+            this device" option, or at least a friendlier unlock screen (e.g. showing
+            the kid's own avatar large while they type) instead of a plain PIN form. */}
         {pinModalFor && (
           <div
             onClick={() => setPinModalFor(null)}
