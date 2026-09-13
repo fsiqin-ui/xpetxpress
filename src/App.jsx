@@ -218,6 +218,12 @@ function levelUnlockCost(n) {
 
 const MAX_PROFILES = 20;
 
+// Remembers which profile this browser TAB already unlocked, so a refresh doesn't
+// send a kid back to the picker + PIN screen. Deliberately sessionStorage, not
+// localStorage: it clears itself once the tab/browser actually closes, so a shared
+// family device still asks fresh the next time someone sits down with it.
+const SESSION_PROFILE_KEY = "xpet_session_profile";
+
 function generateQuestions(cfg) {
   return Array.from({ length: QUESTIONS_PER_LEVEL }, () => {
     const table = cfg.tables[Math.floor(Math.random() * cfg.tables.length)];
@@ -866,6 +872,15 @@ export default function App() {
     (async () => {
       const p = await get("profiles", []);
       setProfiles(p);
+
+      // Already unlocked in this tab earlier (e.g. the page was just refreshed)?
+      // Resume straight into it instead of asking for the name + PIN again.
+      const remembered = sessionStorage.getItem(SESSION_PROFILE_KEY);
+      if (remembered && p.includes(remembered)) {
+        await pickProfile(remembered);
+        return;
+      }
+
       setScreen(p.length ? "profiles" : "addProfile");
       const ages = {};
       const avatars = {};
@@ -880,6 +895,7 @@ export default function App() {
       setProfileAvatarsPreview(avatars);
       setProfilePinPreview(pins);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, get]);
 
   const loadProfileData = useCallback(async (name) => {
@@ -1020,6 +1036,7 @@ export default function App() {
     setProfiles(updated);
     setNewName("");
     setCurrent(name);
+    sessionStorage.setItem(SESSION_PROFILE_KEY, name);
     setAge(null);
     setAvatar(null);
     setStreak(0);
@@ -1059,6 +1076,7 @@ export default function App() {
 
   const pickProfile = async (name) => {
     setCurrent(name);
+    sessionStorage.setItem(SESSION_PROFILE_KEY, name);
     await loadProfileData(name);
     setScreen("menu");
   };
@@ -1468,6 +1486,7 @@ export default function App() {
                   console.error("flush before leaving family failed:", e);
                 }
                 localStorage.removeItem("xpet_family_code");
+                sessionStorage.removeItem(SESSION_PROFILE_KEY);
                 window.location.reload();
               }}
               disabled={leavingFamily}
@@ -1610,7 +1629,16 @@ export default function App() {
             >
               {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
-            <button style={{ ...btnGhost, padding: "8px 12px" }} onClick={() => setScreen("profiles")}>
+            <button
+              style={{ ...btnGhost, padding: "8px 12px" }}
+              onClick={() => {
+                // Deliberately handing the device to someone else — forget who was
+                // remembered for this tab so a refresh doesn't silently resume back
+                // into this profile before the next person picks their own.
+                sessionStorage.removeItem(SESSION_PROFILE_KEY);
+                setScreen("profiles");
+              }}
+            >
               Switch
             </button>
           </div>
