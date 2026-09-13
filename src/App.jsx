@@ -1026,7 +1026,7 @@ export default function App() {
 
   const copyFamilyInvite = async (code) => {
     try {
-      await navigator.clipboard.writeText(familyInviteMessage(code));
+      await navigator.clipboard.writeText(code);
       setFamilyCodeCopied(true);
       setTimeout(() => setFamilyCodeCopied(false), 2000);
     } catch (e) {
@@ -1360,7 +1360,7 @@ export default function App() {
   };
   const familyCodeActions = (code) => (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 6 }}>
-      <button onClick={() => copyFamilyInvite(code)} style={iconBtnSmall} aria-label="Copy family code and invite link">
+      <button onClick={() => copyFamilyInvite(code)} style={iconBtnSmall} aria-label="Copy family code">
         <Copy size={12} />
       </button>
       {canShareFamilyCode && (

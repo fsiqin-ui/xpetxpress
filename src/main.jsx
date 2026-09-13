@@ -78,7 +78,7 @@ function FamilySetup({ onReady }) {
 
   const handleCopyCode = async () => {
     try {
-      await navigator.clipboard.writeText(familyInviteMessage(newCode));
+      await navigator.clipboard.writeText(newCode);
       setCodeCopied(true);
       setTimeout(() => setCodeCopied(false), 2000);
     } catch (e) {
@@ -156,7 +156,7 @@ function FamilySetup({ onReady }) {
 
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <button style={btnGhostSmall} onClick={handleCopyCode}>
-            <Copy size={14} /> {codeCopied ? "Copied!" : "Copy invite"}
+            <Copy size={14} /> {codeCopied ? "Copied!" : "Copy code"}
           </button>
           {canShare && (
             <button style={btnGhostSmall} onClick={handleShareCode}>
@@ -165,7 +165,7 @@ function FamilySetup({ onReady }) {
           )}
         </div>
         <p style={{ color: sub, fontSize: 12, margin: "0 0 18px" }}>
-          {codeCopied ? "Code and link copied to your clipboard." : "Copies the code together with a link to this site."}
+          {codeCopied ? "Code copied to your clipboard." : "Copy copies just the code. Share includes a link to this site."}
         </p>
 
         {hasLocalData && !importDone && (
