@@ -366,6 +366,8 @@ const PET_SICK_CHANCE_PER_TICK = 0.02;
 const PET_VET_COST = 25;
 const PET_RENAME_COST = 75; // deliberately pricier than routine care — a "save up for it" cosmetic choice
 const MAX_PETS = 2;
+const PET_VISIT_BOOST = 10; // happiness gained by each pet in a visit, free — bonding, not economy
+const PET_VISIT_DAILY_TARGET_LIMIT = 3; // distinct sibling profiles you can visit per day
 
 const PET_BREEDS = {
   corgi: {
@@ -801,6 +803,10 @@ export default function App() {
   const [renameInput, setRenameInput] = useState("");
   const [petAction, setPetAction] = useState(null);
   const [petShop, setPetShop] = useState(null);
+  const [friendPets, setFriendPets] = useState({}); // sibling name -> their pets array, for visiting
+  const [visitsSentToday, setVisitsSentToday] = useState({ day: null, targets: [] });
+  const [visitBusyKey, setVisitBusyKey] = useState(null); // `${name}:${petIndex}` currently being visited
+  const [visitMessage, setVisitMessage] = useState(null);
   const petActionTimer = useRef(null);
   const [, forceTick] = useState(0);
   // Tracks which profile the latest `pets` snapshot actually belongs to. Needed
@@ -911,10 +917,18 @@ export default function App() {
       setBalance(profileCache[name].balance || 0);
       setUnlockedLevels(profileCache[name].unlockedLevels || [1]);
       setLedger(profileCache[name].ledger || []);
+      // Pets, unlike the rest of this cache, can now be changed by someone ELSE'S
+      // session (a sibling visiting) — this profile's own tab has no way to know
+      // that happened, so the cached copy can never be trusted here. Always
+      // re-fetch pets fresh instead of trusting profileCache for them, or a visit
+      // received while this tab already had this profile cached would be invisible
+      // and then silently overwritten the next time anything saves this pet.
+      const rawPets = await get(`pets:${name}`, []);
       const cachedMultiplier = petDecayMultiplier(profileCache[name].unlockedLevels || [1]);
-      const cachedPets = (profileCache[name].pets || []).map((p) => applyPetDecay(p, Date.now(), cachedMultiplier));
+      const cachedPets = rawPets.map((p) => applyPetDecay(p, Date.now(), cachedMultiplier));
       setPets(cachedPets);
       setActivePetIndex(0);
+      setProfileCache((prev) => ({ ...prev, [name]: { ...prev[name], pets: cachedPets } }));
       return;
     }
     const s = await get(`stats:${name}`, {});
@@ -1004,6 +1018,27 @@ export default function App() {
     })();
   }, [screen]);
 
+  // Load who's visitable (siblings' pets) and today's sent-visit count fresh each
+  // time the pet screen is opened — other profiles' pets aren't in this profile's
+  // own cache, and another device could have used up the daily visits since.
+  useEffect(() => {
+    if (screen !== "petCare") return;
+    (async () => {
+      const todayStart = startOfSgtDay(Date.now());
+      const others = profiles.filter((p) => p !== current);
+      const petsByName = {};
+      for (const name of others) {
+        const raw = await get(`pets:${name}`, []);
+        if (raw.length > 0) petsByName[name] = raw;
+      }
+      setFriendPets(petsByName);
+
+      let sent = await get(`petVisitsSent:${current}`, null);
+      if (!sent || sent.day !== todayStart) sent = { day: todayStart, targets: [] };
+      setVisitsSentToday(sent);
+    })();
+  }, [screen, profiles, current, get]);
+
   const addProfile = async () => {
     const name = newName.trim();
     if (!name || profiles.length >= MAX_PROFILES || addProfileBusy) return;
@@ -1037,6 +1072,11 @@ export default function App() {
     setNewName("");
     setCurrent(name);
     sessionStorage.setItem(SESSION_PROFILE_KEY, name);
+    setPetShop(null);
+    setVisitMessage(null);
+    setVisitBusyKey(null);
+    setFriendPets({});
+    setVisitsSentToday({ day: null, targets: [] });
     setAge(null);
     setAvatar(null);
     setStreak(0);
@@ -1077,6 +1117,15 @@ export default function App() {
   const pickProfile = async (name) => {
     setCurrent(name);
     sessionStorage.setItem(SESSION_PROFILE_KEY, name);
+    // Pet-screen UI state belongs to whoever was just looking at it — without this,
+    // switching profiles could land the new person on an open panel (or, worse, a
+    // leftover "you visited/were visited" message) that was actually about someone
+    // else's pet, not theirs.
+    setPetShop(null);
+    setVisitMessage(null);
+    setVisitBusyKey(null);
+    setFriendPets({});
+    setVisitsSentToday({ day: null, targets: [] });
     await loadProfileData(name);
     setScreen("menu");
   };
@@ -1240,6 +1289,66 @@ export default function App() {
     setPetShop(null);
     runPetAction("vet", 2000, () => petUpdateActive((p) => ({ ...p, sick: false, lastUpdate: Date.now() })));
   };
+  // A visit is free and only ever raises happiness — it's a bonding mechanic, not
+  // another thing to grind for. Two independent caps: a given pet (mine or theirs)
+  // only gains a visit's happiness once per day, and I can reach at most
+  // PET_VISIT_DAILY_TARGET_LIMIT distinct sibling profiles per day (so having more
+  // siblings than that doesn't let me farm more free happiness than anyone else).
+  const visitPet = async (targetName, targetIndex) => {
+    if (pets.length === 0 || activePetIndex < 0 || visitBusyKey) return;
+    const todayStart = startOfSgtDay(Date.now());
+    const currentSent = visitsSentToday.day === todayStart ? visitsSentToday : { day: todayStart, targets: [] };
+    const alreadyVisitedTarget = currentSent.targets.includes(targetName);
+    if (!alreadyVisitedTarget && currentSent.targets.length >= PET_VISIT_DAILY_TARGET_LIMIT) {
+      setVisitMessage(`You've visited ${PET_VISIT_DAILY_TARGET_LIMIT} friends today — come back tomorrow!`);
+      return;
+    }
+    setVisitBusyKey(`${targetName}:${targetIndex}`);
+    setVisitMessage(null);
+    try {
+      const targetPetsRaw = await get(`pets:${targetName}`, []);
+      const targetPetRaw = targetPetsRaw[targetIndex];
+      if (!targetPetRaw) {
+        setVisitMessage("That pet isn't there anymore.");
+        return;
+      }
+      const targetPet = applyPetDecay(targetPetRaw, Date.now());
+      const targetBoosted = targetPet.lastVisitBoostDay !== todayStart;
+      const updatedTargetPet = {
+        ...targetPet,
+        happiness: targetBoosted ? petClampStat(targetPet.happiness + PET_VISIT_BOOST) : targetPet.happiness,
+        lastVisitBoostDay: targetBoosted ? todayStart : targetPet.lastVisitBoostDay,
+        lastVisitedBy: { name: current, petName: pets[activePetIndex].name, ts: Date.now() },
+      };
+      const updatedTargetPets = targetPetsRaw.map((p, i) => (i === targetIndex ? updatedTargetPet : p));
+      await set(`pets:${targetName}`, updatedTargetPets);
+      setFriendPets((prev) => ({ ...prev, [targetName]: updatedTargetPets }));
+
+      const myPetName = pets[activePetIndex].name;
+      const myBoosted = pets[activePetIndex].lastVisitBoostDay !== todayStart;
+      if (myBoosted) {
+        petUpdateActive((p) => ({ ...p, happiness: petClampStat(p.happiness + PET_VISIT_BOOST), lastVisitBoostDay: todayStart }));
+      }
+
+      if (!alreadyVisitedTarget) {
+        const nextSent = { day: todayStart, targets: [...currentSent.targets, targetName] };
+        setVisitsSentToday(nextSent);
+        await set(`petVisitsSent:${current}`, nextSent);
+      }
+
+      setVisitMessage(
+        myBoosted && targetBoosted
+          ? `${myPetName} visited ${updatedTargetPet.name}! Both got +${PET_VISIT_BOOST} happiness 🎉`
+          : `${myPetName} visited ${updatedTargetPet.name}! ${targetBoosted ? updatedTargetPet.name : myPetName} already had a visit boost today, so only one pet gained happiness this time.`
+      );
+    } catch (e) {
+      console.error("visitPet failed:", e);
+      setVisitMessage("Couldn't complete that visit — check your internet connection and try again.");
+    } finally {
+      setVisitBusyKey(null);
+    }
+  };
+  const dismissVisitedNotice = () => petUpdateActive((p) => ({ ...p, lastVisitedBy: null }));
   const petAdjustStat = (key, delta) => petUpdateActive((p) => ({ ...p, [key]: petClampStat(p[key] + delta), lastUpdate: Date.now() }));
   const petToggleSick = () => petUpdateActive((p) => ({ ...p, sick: !p.sick, lastUpdate: Date.now() }));
   const petRename = (index, newName) => {
@@ -2141,6 +2250,14 @@ export default function App() {
           </div>
         ) : (
           <>
+            {activePet.lastVisitedBy && (
+              <div style={{ ...pCard, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: `1.5px solid ${pCoral}` }}>
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  🎉 <strong>{activePet.lastVisitedBy.name}</strong>'s {activePet.lastVisitedBy.petName} visited {activePet.name}!
+                </p>
+                <button onClick={dismissVisitedNotice} style={{ ...pGhost, padding: "4px 10px", fontSize: 12, flexShrink: 0 }}>Nice!</button>
+              </div>
+            )}
             <div style={{ ...pCard, marginBottom: 14 }}>
               <div style={{ display: "flex", gap: 8 }}>
                 {[
@@ -2170,7 +2287,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
               <button style={{ ...pGhost, flex: 1 }} onClick={() => setPetShop(petShop === "clean" ? null : "clean")}>🧼 Clean</button>
               <button style={{ ...pGhost, flex: 1, borderColor: activePet.sick ? "#E08E45" : "#3A4A6B" }} onClick={() => setPetShop(petShop === "vet" ? null : "vet")}>🏥 Vet</button>
-              <button disabled style={{ ...pGhost, flex: 1, color: pSub, borderColor: "#3A4A6B", background: "#16223F", cursor: "not-allowed" }}>🎀 Coming soon</button>
+              <button style={{ ...pGhost, flex: 1 }} onClick={() => setPetShop(petShop === "friends" ? null : "friends")}>🐾 Visit</button>
             </div>
 
             {petShop === "food" && (
@@ -2232,6 +2349,57 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {petShop === "friends" && (() => {
+              const todayStart = startOfSgtDay(Date.now());
+              const sentToday = visitsSentToday.day === todayStart ? visitsSentToday.targets : [];
+              const capReached = sentToday.length >= PET_VISIT_DAILY_TARGET_LIMIT;
+              const friendEntries = Object.entries(friendPets);
+              return (
+                <div style={pCard}>
+                  <h3 style={{ ...headFont, fontSize: 14, margin: "0 0 4px" }}>Visit a Friend</h3>
+                  <p style={{ color: pSub, fontSize: 12, margin: "0 0 10px" }}>
+                    Free! {activePet.name} can visit up to {PET_VISIT_DAILY_TARGET_LIMIT} friends a day for +{PET_VISIT_BOOST} happiness each.
+                  </p>
+                  {visitMessage && (
+                    <p style={{ color: pGold, fontSize: 12, fontWeight: 700, margin: "0 0 10px" }}>{visitMessage}</p>
+                  )}
+                  {friendEntries.length === 0 ? (
+                    <p style={{ color: pSub, fontSize: 13, margin: 0 }}>No other trainers have adopted a dog yet.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {friendEntries.map(([name, petsArr]) =>
+                        petsArr.map((p, i) => {
+                          const key = `${name}:${i}`;
+                          const visitedToday = sentToday.includes(name);
+                          const disabled = !!visitBusyKey || visitedToday || (capReached && !visitedToday);
+                          return (
+                            <div key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1.5px solid #3A4A6B", borderRadius: 12, padding: "8px 10px" }}>
+                              <span style={{ fontSize: 13 }}>
+                                🐶 <strong>{p.name}</strong>
+                                <span style={{ color: pSub }}> · {name}'s {PET_BREEDS[p.breed]?.name || "dog"}</span>
+                              </span>
+                              <button
+                                style={{ ...pGhost, padding: "6px 12px", fontSize: 12, opacity: disabled ? 0.5 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
+                                onClick={() => visitPet(name, i)}
+                                disabled={disabled}
+                              >
+                                {visitBusyKey === key ? "Visiting…" : visitedToday ? "Visited today" : "Visit"}
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                  {capReached && (
+                    <p style={{ color: pSub, fontSize: 12, margin: "10px 0 0" }}>
+                      You've visited {PET_VISIT_DAILY_TARGET_LIMIT} friends today — come back tomorrow!
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
