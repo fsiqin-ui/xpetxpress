@@ -1607,6 +1607,12 @@ export default function App() {
                 } catch (e) {
                   console.error("flush before leaving family failed:", e);
                 }
+                // Remember it locally (this device only, never sent anywhere) so the
+                // "Welcome" screen can offer a one-tap way back in, instead of making
+                // you retype the code if you left by accident or are just switching
+                // between two families on this same device.
+                const leftCode = localStorage.getItem("xpet_family_code");
+                localStorage.setItem("xpet_last_family", JSON.stringify({ code: leftCode, admin: familyAdmin }));
                 localStorage.removeItem("xpet_family_code");
                 sessionStorage.removeItem(SESSION_PROFILE_KEY);
                 window.location.reload();

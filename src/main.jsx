@@ -75,10 +75,38 @@ function FamilySetup({ onReady }) {
   const [importDone, setImportDone] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const canShare = typeof navigator !== "undefined" && !!navigator.share;
+  const [lastFamily, setLastFamily] = useState(null); // { code, admin } — this device's own last-left family, never shared
+  const [rejoinError, setRejoinError] = useState(null);
 
   useEffect(() => {
     setHasLocalData(localStorage.getItem("profiles") !== null);
+    try {
+      const raw = localStorage.getItem("xpet_last_family");
+      if (raw) setLastFamily(JSON.parse(raw));
+    } catch {
+      // ignore malformed data from an older version of this key
+    }
   }, []);
+
+  const handleRejoin = async () => {
+    if (!lastFamily) return;
+    setBusy(true);
+    setRejoinError(null);
+    try {
+      const exists = await familyExists(lastFamily.code);
+      if (!exists) {
+        setRejoinError("That family isn't there anymore — it may have been removed.");
+        setLastFamily(null);
+        localStorage.removeItem("xpet_last_family");
+      } else {
+        onReady(lastFamily.code);
+      }
+    } catch (e) {
+      console.error(e);
+      setRejoinError("Couldn't rejoin — check your internet connection and try again.");
+    }
+    setBusy(false);
+  };
 
   const handleCopyCode = async () => {
     try {
@@ -245,9 +273,17 @@ function FamilySetup({ onReady }) {
       <button style={{ ...btnPrimary, marginBottom: 10 }} onClick={() => setMode("createName")} disabled={busy}>
         ✨ Create a new family
       </button>
-      <button style={btnGhost} onClick={() => setMode("join")} disabled={busy}>
+      <button style={{ ...btnGhost, marginBottom: lastFamily ? 10 : 0 }} onClick={() => setMode("join")} disabled={busy}>
         🔑 Join a family with a code
       </button>
+      {lastFamily && (
+        <button style={btnGhost} onClick={handleRejoin} disabled={busy}>
+          {busy ? "Rejoining…" : `↩ Rejoin ${lastFamily.admin ? `${lastFamily.admin}'s family` : "your family"} · ${lastFamily.code}`}
+        </button>
+      )}
+      {rejoinError && (
+        <p style={{ color: "#F2994A", fontSize: 13, marginTop: 10, marginBottom: 0 }}>{rejoinError}</p>
+      )}
     </Screen>
   );
 }
