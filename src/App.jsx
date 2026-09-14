@@ -1501,6 +1501,8 @@ export default function App() {
     fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
     padding: "24px 18px",
     boxSizing: "border-box",
+    maxWidth: 480,
+    margin: "0 auto",
   };
   const headFont = { fontFamily: "ui-rounded, 'Baloo 2', Inter, system-ui, sans-serif" };
   const card = { background: panel, borderRadius: 18, padding: 20 };

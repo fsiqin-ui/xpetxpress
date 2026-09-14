@@ -56,7 +56,9 @@
          for a small niche app like this. -->
     <style>
       html, body, #root { height: 100%; margin: 0; }
-      body { -webkit-tap-highlight-color: transparent; }
+      /* Matches the app's own navy background so a centered, capped-width layout on a
+         wide screen reads as a deliberate column instead of a page with white bars. */
+      body { -webkit-tap-highlight-color: transparent; background: #0F1B33; }
     </style>
   </head>
   <body>
