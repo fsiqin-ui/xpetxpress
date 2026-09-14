@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
     <title>xPet xPress</title>
+    <!-- TODO (deferred, revisit later): organic SEO — no action taken yet, just tracked here.
+         Quick wins: meta description + Open Graph/Twitter card tags, a favicon, public/robots.txt
+         + public/sitemap.xml, JSON-LD structured data (WebApplication/SoftwareApplication schema),
+         and a more keyword-relevant one-liner on the landing screen (App.jsx's current onboarding
+         copy is functional, not findable).
+         Bigger lift: code-split the ~590KB JS bundle (Vite's own build output already warns about
+         this) for Core Web Vitals / first paint, and consider prerendering the public landing shell
+         (e.g. vite-plugin-ssg) — this is a single-route client-rendered SPA with nothing else
+         crawlable (the actual game is gated behind a family code), so crawlers that don't execute
+         JS see an empty <div id="root"> until then.
+         Off-page (not code): directory/community listings likely matter more than on-page tweaks
+         for a small niche app like this. -->
     <style>
       html, body, #root { height: 100%; margin: 0; }
       body { -webkit-tap-highlight-color: transparent; }
