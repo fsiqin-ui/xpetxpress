@@ -29,14 +29,17 @@ function Screen({ children }) {
   return (
     <div
       style={{
-        background: bg, color: ink, minHeight: "100vh", display: "flex",
-        alignItems: "center", justifyContent: "center", padding: 20,
+        background: bg, color: ink, minHeight: "100vh", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", padding: 20, gap: 14,
         fontFamily: "Inter, system-ui, sans-serif", boxSizing: "border-box",
       }}
     >
       <div style={{ background: panel, borderRadius: 18, padding: 22, width: "100%", maxWidth: 380 }}>
         {children}
       </div>
+      <p style={{ color: sub, fontSize: 11, margin: 0, textAlign: "center" }}>
+        © {new Date().getFullYear()} FSQ. All rights reserved.
+      </p>
     </div>
   );
 }
