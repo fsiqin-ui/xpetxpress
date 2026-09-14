@@ -1336,6 +1336,19 @@ export default function App() {
         await set(`petVisitsSent:${current}`, nextSent);
       }
 
+      // A visit touches TWO documents (the target's pet and, usually, my own) —
+      // double the normal exposure to the debounced-save race, where a refresh
+      // moments after acting can beat the background save to actually landing.
+      // Wait for both writes to really reach storage before calling this done,
+      // so "it worked" on screen means it survives a refresh, not just this tab.
+      if (window.storage && window.storage.flush) {
+        try {
+          await window.storage.flush();
+        } catch (e) {
+          console.error("flush after visit failed:", e);
+        }
+      }
+
       setVisitMessage(
         myBoosted && targetBoosted
           ? `${myPetName} visited ${updatedTargetPet.name}! Both got +${PET_VISIT_BOOST} happiness 🎉`
