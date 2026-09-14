@@ -266,9 +266,10 @@ function FamilySetup({ onReady }) {
 
   return (
     <Screen>
-      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>Welcome to xPet</h1>
+      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>Welcome to xPet xPress</h1>
       <p style={{ color: sub, fontSize: 14, margin: "0 0 20px" }}>
-        Set up a family so progress and the leaderboard follow everyone across devices.
+        Practice times tables, earn coins, and raise a virtual pet. Set up a family so
+        progress and the leaderboard follow everyone across devices.
       </p>
       <button style={{ ...btnPrimary, marginBottom: 10 }} onClick={() => setMode("createName")} disabled={busy}>
         ✨ Create a new family

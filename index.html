@@ -3,12 +3,50 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-    <title>xPet xPress</title>
-    <!-- TODO (deferred, revisit later): organic SEO — no action taken yet, just tracked here.
-         Quick wins: meta description + Open Graph/Twitter card tags, a favicon, public/robots.txt
-         + public/sitemap.xml, JSON-LD structured data (WebApplication/SoftwareApplication schema),
-         and a more keyword-relevant one-liner on the landing screen (App.jsx's current onboarding
-         copy is functional, not findable).
+    <title>xPet xPress — Times Tables Practice With a Virtual Pet</title>
+    <meta name="description" content="A free times tables game for kids — earn coins, level up, and raise a virtual pet. Family profiles share one leaderboard across devices." />
+
+    <!-- TODO: replace xpetxpress.example.com with the real domain once one is live
+         (also update public/robots.txt and public/sitemap.xml, which repeat it). -->
+    <link rel="canonical" href="https://xpetxpress.example.com/" />
+
+    <!-- Open Graph / Twitter card — og-image.png and the card copy in render-og.mjs's
+         source (scratchpad, not committed) reuse the exact Logo() artwork from App.jsx
+         so the social preview matches the in-app brand. Regenerate it if the logo changes. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://xpetxpress.example.com/" />
+    <meta property="og:title" content="xPet xPress — Times Tables Practice With a Virtual Pet" />
+    <meta property="og:description" content="A free times tables game for kids — earn coins, level up, and raise a virtual pet. Family profiles share one leaderboard across devices." />
+    <meta property="og:image" content="https://xpetxpress.example.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="xPet xPress — Times Tables Practice With a Virtual Pet" />
+    <meta name="twitter:description" content="A free times tables game for kids — earn coins, level up, and raise a virtual pet. Family profiles share one leaderboard across devices." />
+    <meta name="twitter:image" content="https://xpetxpress.example.com/og-image.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "xPet xPress",
+        "description": "A free times tables practice game for kids that rewards correct answers with coins, level progression, and a virtual pet to raise. Families share a leaderboard across devices with a shared family code.",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Any (web browser)",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
+
+    <!-- TODO (deferred, revisit later): organic SEO — quick wins above are done; the
+         rest is still tracked here, no action taken yet.
          Bigger lift: code-split the ~590KB JS bundle (Vite's own build output already warns about
          this) for Core Web Vitals / first paint, and consider prerendering the public landing shell
          (e.g. vite-plugin-ssg) — this is a single-route client-rendered SPA with nothing else

@@ -1,0 +1,6 @@
+# Everything crawlable here is the public landing screen — the game itself
+# is gated behind a family code and has nothing indexable to disallow.
+User-agent: *
+Allow: /
+
+Sitemap: https://xpetxpress.example.com/sitemap.xml
